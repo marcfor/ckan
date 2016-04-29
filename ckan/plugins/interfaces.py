@@ -4,7 +4,7 @@ extend CKAN.
 '''
 __all__ = [
     'Interface',
-    'IGenshiStreamFilter', 'IRoutes',
+    'IRoutes',
     'IMapper', 'ISession',
     'IMiddleware',
     'IAuthFunctions',
@@ -60,23 +60,6 @@ class IMiddleware(Interface):
         return app
 
 
-class IGenshiStreamFilter(Interface):
-    '''
-    Hook into template rendering.
-    See ckan.lib.base.py:render
-    '''
-
-    def filter(self, stream):
-        """
-        Return a filtered Genshi stream.
-        Called when any page is rendered.
-
-        :param stream: Genshi stream of the current output document
-        :returns: filtered Genshi stream
-        """
-        return stream
-
-
 class IRoutes(Interface):
     """
     Plugin into the setup of the routes map creation.
@@ -106,7 +89,7 @@ class IRoutes(Interface):
 class IMapper(Interface):
     """
     A subset of the SQLAlchemy mapper extension hooks.
-    See http://www.sqlalchemy.org/docs/05/reference/orm/interfaces.html#sqlalchemy.orm.interfaces.MapperExtension
+    See http://docs.sqlalchemy.org/en/rel_0_9/orm/deprecated.html#sqlalchemy.orm.interfaces.MapperExtension
 
     Example::
 
@@ -196,9 +179,21 @@ class IDomainObjectModification(Interface):
     """
 
     def notify(self, entity, operation):
+        """
+        Send a notification on entity modification.
+
+        :param entity: instance of module.Package.
+        :param operation: 'new', 'changed' or 'deleted'.
+        """
         pass
 
     def notify_after_commit(self, entity, operation):
+        """
+        Send a notification after entity modification.
+
+        :param entity: instance of module.Package.
+        :param operation: 'new', 'changed' or 'deleted'.
+        """
         pass
 
 
@@ -208,6 +203,11 @@ class IResourceUrlChange(Interface):
     """
 
     def notify(self, resource):
+        """
+        Give user a notify is resource url has changed.
+
+        :param resource, instance of model.Resource
+        """
         pass
 
 
@@ -1173,7 +1173,7 @@ class IGroupForm(Interface):
 
     The behaviour of the plugin is determined by 5 method hooks:
 
-     - package_form(self)
+     - group_form(self)
      - form_to_db_schema(self)
      - db_to_form_schema(self)
      - check_data_dict(self, data_dict)
@@ -1188,6 +1188,7 @@ class IGroupForm(Interface):
 
      - is_fallback(self)
      - group_types(self)
+     - group_controller(self)
 
     Implementations might want to consider mixing in
     ckan.lib.plugins.DefaultGroupForm which provides
@@ -1220,9 +1221,20 @@ class IGroupForm(Interface):
         type will raise an exception at startup.
         """
 
+    def group_controller(self):
+        """
+        Returns the name of the group controller.
+
+        The group controller is the controller, that is used to handle requests
+        of the group type(s) of this plugin.
+
+        If this method is not provided, the default group controller is used
+        (`group`).
+        """
+
     ##### End of control methods
 
-    ##### Hooks for customising the PackageController's behaviour        #####
+    ##### Hooks for customising the GroupController's behaviour          #####
     ##### TODO: flesh out the docstrings a little more.                  #####
     def new_template(self):
         """
@@ -1256,7 +1268,7 @@ class IGroupForm(Interface):
         rendered for the edit page
         """
 
-    def package_form(self):
+    def group_form(self):
         """
         Returns a string representing the location of the template to be
         rendered.  e.g. "group/new_group_form.html".

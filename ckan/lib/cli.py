@@ -181,13 +181,11 @@ class ManageDb(CkanCommand):
 
     db create                      - alias of db upgrade
     db init                        - create and put in default data
-    db clean
+    db clean                       - clears db (including dropping tables) and
+                                     search index
     db upgrade [version no.]       - Data migrate
     db version                     - returns current version of data schema
     db dump FILE_PATH              - dump to a pg_dump file
-    db simple-dump-csv FILE_PATH   - dump just datasets in CSV format
-    db simple-dump-json FILE_PATH  - dump just datasets in JSON format
-    db user-dump-csv FILE_PATH     - dump user information to a CSV file
     db load FILE_PATH              - load a pg_dump from a file
     db load-only FILE_PATH         - load a pg_dump from a file but don\'t do
                                      the schema upgrade or search indexing
@@ -238,12 +236,6 @@ class ManageDb(CkanCommand):
             self.load()
         elif cmd == 'load-only':
             self.load(only_load=True)
-        elif cmd == 'simple-dump-csv':
-            self.simple_dump_csv()
-        elif cmd == 'simple-dump-json':
-            self.simple_dump_json()
-        elif cmd == 'user-dump-csv':
-            self.user_dump_csv()
         elif cmd == 'create-from-model':
             model.repo.create_db()
             if self.verbose:
@@ -325,35 +317,6 @@ class ManageDb(CkanCommand):
             print 'Now remember you have to call \'db upgrade\' and then \'search-index rebuild\'.'
         print 'Done'
 
-    def simple_dump_csv(self):
-        import ckan.model as model
-        if len(self.args) < 2:
-            print 'Need csv file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.SimpleDumper().dump(dump_file, format='csv')
-
-    def simple_dump_json(self):
-        import ckan.model as model
-        if len(self.args) < 2:
-            print 'Need json file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.SimpleDumper().dump(dump_file, format='json')
-
-    def user_dump_csv(self):
-        if len(self.args) < 2:
-            print 'Need csv file path'
-            return
-        dump_filepath = self.args[1]
-        import ckan.lib.dumper as dumper
-        dump_file = open(dump_filepath, 'w')
-        dumper.UserDumper().dump(dump_file)
-
     def migrate_filestore(self):
         from ckan.model import Session
         import requests
@@ -386,10 +349,11 @@ class ManageDb(CkanCommand):
                         out.write(chunk)
 
             Session.execute("update resource set url_type = 'upload'"
-                            "where id = '%s'" % id)
+                            "where id = :id", {'id': id})
             Session.execute("update resource_revision set url_type = 'upload'"
-                            "where id = '%s' and "
-                            "revision_id = '%s'" % (id, revision_id))
+                            "where id = :id and "
+                            "revision_id = :revision_id",
+                            {'id': id, 'revision_id': revision_id})
             Session.commit()
             print "Saved url %s" % url
 
@@ -1211,7 +1175,7 @@ class Tracking(CkanCommand):
                      CAST(access_timestamp AS Date) AS tracking_date,
                      tracking_type INTO tracking_tmp
                  FROM tracking_raw
-                 WHERE CAST(access_timestamp as Date)='%s';
+                 WHERE CAST(access_timestamp as Date)=%s;
 
                  INSERT INTO tracking_summary
                    (url, count, tracking_date, tracking_type)
@@ -1220,8 +1184,8 @@ class Tracking(CkanCommand):
                  GROUP BY url, tracking_date, tracking_type;
 
                  DROP TABLE tracking_tmp;
-                 COMMIT;''' % summary_date
-        engine.execute(sql)
+                 COMMIT;'''
+        engine.execute(sql, summary_date)
 
         # get ids for dataset urls
         sql = '''UPDATE tracking_summary t
@@ -1452,10 +1416,10 @@ class Profile(CkanCommand):
     '''Code speed profiler
     Provide a ckan url and it will make the request and record
     how long each function call took in a file that can be read
-    by runsnakerun.
+    by pstats.Stats (command-line) or runsnakerun (gui).
 
     Usage:
-       profile URL
+       profile URL [username]
 
     e.g. profile /data/search
 
@@ -1467,7 +1431,7 @@ class Profile(CkanCommand):
     '''
     summary = __doc__.split('\n')[0]
     usage = __doc__
-    max_args = 1
+    max_args = 2
     min_args = 1
 
     def _load_config_into_test_app(self):
@@ -1492,10 +1456,15 @@ class Profile(CkanCommand):
         import re
 
         url = self.args[0]
+        if self.args[1:]:
+            user = self.args[1]
+        else:
+            user = 'visitor'
 
         def profile_url(url):
             try:
-                res = self.app.get(url, status=[200], extra_environ={'REMOTE_USER': 'visitor'})
+                res = self.app.get(url, status=[200],
+                                   extra_environ={'REMOTE_USER': user})
             except paste.fixture.AppError:
                 print 'App error: ', url.strip()
             except KeyboardInterrupt:
@@ -1508,6 +1477,11 @@ class Profile(CkanCommand):
         output_filename = 'ckan%s.profile' % re.sub('[/?]', '.', url.replace('/', '.'))
         profile_command = "profile_url('%s')" % url
         cProfile.runctx(profile_command, globals(), locals(), filename=output_filename)
+        import pstats
+        stats = pstats.Stats(output_filename)
+        stats.sort_stats('cumulative')
+        stats.print_stats(0.1)  # show only top 10% of lines
+        print 'Only top 10% of lines shown'
         print 'Written profile to: %s' % output_filename
 
 
